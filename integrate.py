@@ -12,14 +12,13 @@ central = [np.array(                      [-1/2, 0, 1/2],                       
 		   np.array(       [-1/60 ,  3/20, -3/4, 0, 3/4, -3/20, 1/60],          dtype = np.float64),
 		   np.array([1/280, -4/105,  1/5 , -4/5, 0, 4/5, -1/5 , 4/105, -1/280], dtype = np.float64)]
 
-#maximum number of evaluation threads per block
-ethreads = 512
-
 #error threshold for levelset contribution
 EPS = 1e-14
 
 #levelset kernel block size
 _threads = np.array([8,8,8], dtype = np.int64)
+#maximum number of evaluation threads per block
+ethreads = 512
 
 #maximum chunk shape (determined by available memory on GPU)
 # chunkshape = np.array([512, 512, 512], dtype = np.int64)
@@ -140,7 +139,7 @@ def integrate_fixed(kernels, kargs, shape, res, depth, fmin, fmax):
 	kargs.append(depth)
 
 	h = 1/(res**3)
-	return compute_levelset(kernels, kargs, blocks, threads, offsets, shape)*h #*((fmax - fmin)/2)
+	return compute_levelset(kernels, kargs, blocks, threads, offsets, shape)*h
 
 def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 	#notation from https://www.youtube.com/watch?v=gYVYOtmx-Ms
@@ -174,10 +173,6 @@ def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 	#compute kernel info only once for each levelset kernel
 	blocks, threads, offsets = setup_levelset_kernel(shape)
 
-
-	levels = []
-
-
 	h = 1/(res**3)
 
 	fmid = (fmin + fmax)/2.
@@ -197,10 +192,6 @@ def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 
 		a,  c,  b  = quad
 		Ia, Ic, Ib = I
-
-		levels.append(a)
-		levels.append(c)
-		levels.append(b)
 
 		##########
 		# print(depth + 1, a, b)
@@ -241,7 +232,7 @@ def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 	# if depth_flag:
 		# print('You reached maximum depth before reaching the provided error tolerance')
 
-	return integral, levels
+	return integral
 
 def integrate_adaptive(kernels, kargs, shape, res, depth, fmin, fmax, err, quad):
 	if quad == 'simpsons':
@@ -309,7 +300,7 @@ def compile_levelsets_fixed(genus, quad, g):
 			shared[sh_n] = f[r_n]
 
 			#NOTE:
-				#for shared memory loads if kernel block is smaller in a dim than the radius/genus it will miss loads
+				#for these shared memory loads if kernel block is smaller in a dim than the radius/genus it will miss loads
 			#######################
 			#genus offsets in 1d (for function)
 			rady = genus*rshape[0]

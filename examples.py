@@ -20,7 +20,7 @@ def volume():
 	res    = 32
 	#stencil genus. With float64 data maximum allowed is 2 (due to shared memory limitations)
 	genus  = 2
-	#quadrature scheme to use
+	#quadrature to use
 	quad   = 'simpsons'
 	#use adaptive or fixed quardature scheme (fixed is faster for small grids)
 	scheme = 'fixed'
@@ -46,7 +46,6 @@ def trivariate():
 
 	def f(x,y,z):
 		return math.sqrt(x*x + y*y + z*z) - r
-		# return x*x + y*y + z*z - r
 
 	#limits of integration
 	limit  = [-1, 0]
@@ -58,7 +57,7 @@ def trivariate():
 	res    = 32
 	#stencil genus. With float64 data maximum allowed is 2 (due to shared memory limitations)
 	genus  = 2
-	#quadrature scheme to use
+	#quadrature to use
 	quad   = 'simpsons'
 	#use adaptive or fixed quardature scheme (fixed is faster for small grids)
 	scheme = 'fixed'
@@ -138,7 +137,7 @@ def saye():
 	res    = 32
 	#stencil genus. With float64 data maximum allowed is 2 (due to shared memory limitations)
 	genus  = 2
-	#quadrature scheme to use
+	#quadrature to use
 	quad   = 'simpsons'
 	#use adaptive or fixed quardature scheme (fixed is faster for small grids)
 	scheme = 'fixed'
@@ -159,6 +158,7 @@ def saye():
 	print("True: %s"%true)
 	print()
 
+# #Run examples
 # volume()
 # trivariate()
-saye()
+# saye()
