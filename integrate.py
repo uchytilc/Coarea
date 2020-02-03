@@ -223,14 +223,6 @@ def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 			Id = compute_levelset(kernels, [*kargs, d], blocks, threads, offsets, shape)*h
 			Ie = compute_levelset(kernels, [*kargs, e], blocks, threads, offsets, shape)*h
 
-			# spacing = (c - a)/6
-			# spacing = 1/6 
-			# print(f'{a}	{Ia*spacing}')
-			# print(f'{d}	{Id*4*spacing}')
-			# print(f'{c}	{Ic*2*spacing}')
-			# print(f'{e}	{Ie*4*spacing}')
-			# print(f'{b}	{Ib*spacing}')
-
 			I2 = (c - a)/6.*(Ia + 4.*Id + 2.*Ic + 4.*Ie + Ib)
 
 			#the error threshold has been reached. Accumulate contribution and move to next interval
@@ -247,8 +239,7 @@ def adaptive_simpsons(kernels, kargs, shape, res, max_depth, fmin, fmax, err):
 				quadrature.append([[c, e, b], [Ic, Ie, Ib], depth + 1])
 
 	# if depth_flag:
-	# 	print('You reached maximum depth before reaching the provided error tolerance')
-
+		# print('You reached maximum depth before reaching the provided error tolerance')
 
 	return integral, levels
 
@@ -317,7 +308,8 @@ def compile_levelsets_fixed(genus, quad, g):
 			#center
 			shared[sh_n] = f[r_n]
 
-			#if kernel block is smaller in a dim than the radius it will miss loads (this is faster however)
+			#NOTE:
+				#for shared memory loads if kernel block is smaller in a dim than the radius/genus it will miss loads
 			#######################
 			#genus offsets in 1d (for function)
 			rady = genus*rshape[0]
@@ -341,34 +333,6 @@ def compile_levelsets_fixed(genus, quad, g):
 			if cuda.threadIdx.z > cuda.blockDim.z - 1 - genus:
 				shared[sh_n + sh_radz] = f[r_n + radz]
 			#######################
-
-			# #genus offsets in 1d (for function)
-			# rady = (genus*rshape[0])//genus
-			# radz = (genus*rshape[0]*rshape[1])//genus
-	 
-			# #genus offsets in 1d (for shared memory)
-			# sh_rady = (genus*sh_rl)//genus
-			# sh_radz = (genus*sh_rl*sh_rw)//genus
-
-			# #faces
-			# if cuda.threadIdx.x < 1:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n - r] = f[r_n - r]
-			# if cuda.threadIdx.x > cuda.blockDim.x - 2:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n + r] = f[r_n + r]
-			# if cuda.threadIdx.y < 1:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n - r*sh_rady] = f[r_n - r*rady]
-			# if cuda.threadIdx.y > cuda.blockDim.y - 2:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n + r*sh_rady] = f[r_n + r*rady]
-			# if cuda.threadIdx.z < 1:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n - r*sh_radz] = f[r_n - r*radz]
-			# if cuda.threadIdx.z > cuda.blockDim.z - 2:
-			# 	for r in range(1, genus + 1):
-			# 		shared[sh_n + r*sh_radz] = f[r_n + r*radz]
 
 			#sync threads in block after loading shared memory
 			cuda.syncthreads()
@@ -412,31 +376,17 @@ def compile_levelsets_fixed(genus, quad, g):
 				spacing = math.pow(2, -depth)
 				#total number of quad points
 				total   = (1 << depth) + 1
-				# #integer location of current point within span
-				# current = int((shared[sh_n] - limit[0])/(span*spacing))
 				#integer loction of min neighbor along span (clipped at lower and upper limit)
 				start   = max(min(int((minimum - limit[0])/(span*spacing)), total), 0)
 				#integer loction of max neighbor along span (clipped at lower and upper limit)
 				stop    = max(min(int((maximum - limit[0])/(span*spacing)) + 1, total), 0)
 
-				#######################
 				#number of levelsets to loop over
 				for l in range(start,stop):
 					#current levelset value
 					levelset = l*spacing*span + limit[0]
 					#corresponding quad element coeff
 					quad = __quad(l, total)*spacing*span
-				#######################
-
-				# #######################
-				# #number of levelsets to loop over
-				# for l in range(total):
-				# # for l in range(2,3):
-				# 	#current levelset value
-				# 	levelset = l*spacing*span + limit[0]
-				# 	#corresponding quad element coeff
-				# 	quad = __quad(l, total)*spacing*span
-				# #######################
 
 					dchidx = 0.
 					dchidy = 0.
@@ -461,7 +411,7 @@ def compile_levelsets_fixed(genus, quad, g):
 		@cuda.jit('void(f8[:],f8[:],f8[:,:],i8[:],i8[:],f8[:],i8,i8[:])')
 		def __compute_levelsets_outer(integral, f, grad, rshape, shape, limit, depth, offset):
 			#######################
-			#Identical to __compute_levelsets_inner without an offset or a bounds check
+			#Identical to __compute_levelsets_inner with an offset and a bounds check
 			#######################
 
 			i,j,k = cuda.grid(3)
@@ -494,6 +444,7 @@ def compile_levelsets_fixed(genus, quad, g):
 			sh_rady = (genus*sh_rl)//genus
 			sh_radz = (genus*sh_rl*sh_rw)//genus
 
+			#slower shared memory loads but prevents misses if a dim is smaller than rad/genus
 			if cuda.threadIdx.x < 1:
 				for r in range(1, genus + 1):
 					shared[sh_n - r] = f[r_n - r]
@@ -544,18 +495,9 @@ def compile_levelsets_fixed(genus, quad, g):
 				start   = min(max(int((minimum - limit[0])/(span*spacing)), 0), total)
 				stop    = max(min(int((maximum - limit[0])/(span*spacing)) + 1, total), 0)
 
-				#######################
 				for l in range(start,stop):
 					levelset = l*spacing*span + limit[0]
 					quad = __quad(l, total)*spacing*span
-				#######################
-
-				# #######################
-				# for l in range(total):
-				# # for l in range(2, 3):
-				# 	levelset = l*spacing*span + limit[0]
-				# 	quad = __quad(l, total)*spacing*span
-				# #######################
 
 					dchidx = 0.
 					dchidy = 0.
@@ -583,149 +525,78 @@ def compile_levelsets_fixed(genus, quad, g):
 
 		@cuda.jit('void(f8[:],f8[:],f8[:,:],i8[:],i8[:],f8[:],f8[:],i8)')
 		def __compute_levelsets_inner_integrand(integral, f, grad, rshape, shape, g, limit, depth):
+			#######################
+			#Identical to __compute_levelsets_inner except with the integrand included
+			#######################
+
 			i,j,k = cuda.grid(3)
 
-			#set shared mem size to maximum possible block size
 			shared = cuda.shared.array(shape = (sh_size,), dtype = float64)
-			#constant array filled with stencil values
 			stencil = cuda.const.array_like(constant)
 
-			#shared memory indicies
 			sh_i = cuda.threadIdx.x + genus
 			sh_j = cuda.threadIdx.y + genus
 			sh_k = cuda.threadIdx.z + genus
 
-			#flattened integral index
 			n    = __flatten3d(i, j, k, shape)
-			#flattened function index
 			r_n  = __flatten3d(i + genus, j + genus, k + genus, rshape)
-			#flattened shared memory index
 			sh_n = sh_i + sh_j*sh_rl + sh_k*sh_rl*sh_rw
 
-			#Load shared memory
-			#center
 			shared[sh_n] = f[r_n]
 
-			#if kernel block is smaller in a dim than the radius it will miss loads (this is faster however)
-			########################
-			# #genus offsets in 1d (for function)
-			# rady = genus*rshape[0]
-			# radz = genus*rshape[0]*rshape[1]
+			rady = genus*rshape[0]
+			radz = genus*rshape[0]*rshape[1]
 
-			# #genus offsets in 1d (for shared memory)
-			# sh_rady = genus*sh_rl
-			# sh_radz = genus*sh_rl*sh_rw
-
-			# #faces
-			# if cuda.threadIdx.x < genus:
-			# 	shared[sh_n - genus] = f[r_n - genus]
-			# if cuda.threadIdx.x > cuda.blockDim.x - 1 - genus:
-			# 	shared[sh_n + genus] = f[r_n + genus]
-			# if cuda.threadIdx.y < genus:
-			# 	shared[sh_n - sh_rady] = f[r_n - rady]
-			# if cuda.threadIdx.y > cuda.blockDim.y - 1 - genus:
-			# 	shared[sh_n + sh_rady] = f[r_n + rady]
-			# if cuda.threadIdx.z < genus:
-			# 	shared[sh_n - sh_radz] = f[r_n - radz]
-			# if cuda.threadIdx.z > cuda.blockDim.z - 1 - genus:
-			# 	shared[sh_n + sh_radz] = f[r_n + radz]
-			########################
-
-			#genus offsets in 1d (for function)
-			rady = (genus*rshape[0])//genus
-			radz = (genus*rshape[0]*rshape[1])//genus
-	 
-			#genus offsets in 1d (for shared memory)
-			sh_rady = (genus*sh_rl)//genus
-			sh_radz = (genus*sh_rl*sh_rw)//genus
+			sh_rady = genus*sh_rl
+			sh_radz = genus*sh_rl*sh_rw
 
 			#faces
-			if cuda.threadIdx.x < 1:
-				for r in range(1, genus + 1):
-					shared[sh_n - r] = f[r_n - r]
-			if cuda.threadIdx.x > cuda.blockDim.x - 2:
-				for r in range(1, genus + 1):
-					shared[sh_n + r] = f[r_n + r]
-			if cuda.threadIdx.y < 1:
-				for r in range(1, genus + 1):
-					shared[sh_n - r*sh_rady] = f[r_n - r*rady]
-			if cuda.threadIdx.y > cuda.blockDim.y - 2:
-				for r in range(1, genus + 1):
-					shared[sh_n + r*sh_rady] = f[r_n + r*rady]
-			if cuda.threadIdx.z < 1:
-				for r in range(1, genus + 1):
-					shared[sh_n - r*sh_radz] = f[r_n - r*radz]
-			if cuda.threadIdx.z > cuda.blockDim.z - 2:
-				for r in range(1, genus + 1):
-					shared[sh_n + r*sh_radz] = f[r_n + r*radz]
+			if cuda.threadIdx.x < genus:
+				shared[sh_n - genus] = f[r_n - genus]
+			if cuda.threadIdx.x > cuda.blockDim.x - 1 - genus:
+				shared[sh_n + genus] = f[r_n + genus]
+			if cuda.threadIdx.y < genus:
+				shared[sh_n - sh_rady] = f[r_n - rady]
+			if cuda.threadIdx.y > cuda.blockDim.y - 1 - genus:
+				shared[sh_n + sh_rady] = f[r_n + rady]
+			if cuda.threadIdx.z < genus:
+				shared[sh_n - sh_radz] = f[r_n - radz]
+			if cuda.threadIdx.z > cuda.blockDim.z - 1 - genus:
+				shared[sh_n + sh_radz] = f[r_n + radz]
 
-			#sync threads in block after loading shared memory
 			cuda.syncthreads()
 
-			#contribution to the total integral from this point
 			contributions = 0
 
-			#precompute denominator (it is constant over each levelset contribution)
 			den = grad[n][0]*grad[n][0] + grad[n][1]*grad[n][1] + grad[n][2]*grad[n][2]
 
-			#check if the denom isn't zero
 			if den > EPS:
-				#find min and max neighbors. Use neighbors to determine span of quad points that contribute to current point
 				minimum = shared[sh_n]
 				maximum = shared[sh_n]
-				#need to index at 1 with genus when finding max/min (starting at 0 means you just check shared[sh_n] 12 times)
 				for r in range(1, genus + 1):
-					#min i neighbors
 					minimum = min(shared[sh_n + r], minimum)
 					minimum = min(shared[sh_n - r], minimum)
-					#min j neighbors
 					minimum = min(shared[sh_n + r*sh_rl], minimum)
 					minimum = min(shared[sh_n - r*sh_rl], minimum)
-					#min k neighbors
 					minimum = min(shared[sh_n + r*sh_rl*sh_rw], minimum)
 					minimum = min(shared[sh_n - r*sh_rl*sh_rw], minimum)
 
-					#max i neighbors
 					maximum = max(shared[sh_n + r], maximum)
 					maximum = max(shared[sh_n - r], maximum)
-					#max j neighbors
 					maximum = max(shared[sh_n + r*sh_rl], maximum)
 					maximum = max(shared[sh_n - r*sh_rl], maximum)
-					#max k neighbors
 					maximum = max(shared[sh_n + r*sh_rl*sh_rw], maximum)
 					maximum = max(shared[sh_n - r*sh_rl*sh_rw], maximum)
 
-				#span of function values between limits of integration
 				span    = limit[1] - limit[0]
-				#spacing of quad elements within span
 				spacing = math.pow(2, -depth)
-				#total number of quad points
 				total   = (1 << depth) + 1
-				# #integer location of current point within span
-				# current = int((shared[sh_n] - limit[0])/(span*spacing))
-				#integer loction of min neighbor along span (clipped at lower and upper limit)
 				start   = max(min(int((minimum - limit[0])/(span*spacing)), total), 0)
-				#integer loction of max neighbor along span (clipped at lower and upper limit)
 				stop    = max(min(int((maximum - limit[0])/(span*spacing)) + 1, total), 0)
 
-				#######################
-				#number of levelsets to loop over
 				for l in range(start,stop):
-					#current levelset value
 					levelset = l*spacing*span + limit[0]
-					#corresponding quad element coeff
 					quad = __quad(l, total)*spacing*span
-				#######################
-
-				# #######################
-				# #number of levelsets to loop over
-				# # for l in range(total):
-				# for l in range(total):
-				# 	#current levelset value
-				# 	levelset = l*spacing*span + limit[0]
-				# 	#corresponding quad element coeff
-				# 	quad = __quad(l, total)*spacing
-				# #######################
 
 					dchidx = 0.
 					dchidy = 0.
@@ -750,17 +621,14 @@ def compile_levelsets_fixed(genus, quad, g):
 		@cuda.jit('void(f8[:],f8[:],f8[:,:],i8[:],i8[:],f8[:],f8[:],i8,i8[:])')
 		def __compute_levelsets_outer_integrand(integral, f, grad, rshape, shape, g, limit, depth, offset):
 			#######################
-			#Identical to __compute_levelsets_inner without an offset or a bounds check
+			#Identical to __compute_levelsets_inner_integrand except with offset and bounds check
 			#######################
 
 			i,j,k = cuda.grid(3)
 
-			#offset kernel indicies to position in function
 			i += offset[0]
 			j += offset[1]
 			k += offset[2]
-
-			#run a kernel bounds check on the outer kernel blocks
 			if i >= shape[0] or j >= shape[1] or k >= shape[2]:
 				return
 
@@ -833,17 +701,9 @@ def compile_levelsets_fixed(genus, quad, g):
 				start   = min(max(int((minimum - limit[0])/(span*spacing)), 0), total)
 				stop    = max(min(int((maximum - limit[0])/(span*spacing)) + 1, total), 0)
 
-				#######################
 				for l in range(start,stop):
 					levelset = l*spacing*span + limit[0]
 					quad = __quad(l, total)*spacing*span
-				#######################
-
-				# #######################
-				# for l in range(total):
-				# 	levelset = l*spacing*span + limit[0]
-				# 	quad = __quad(l, total)*spacing
-				# #######################
 
 					dchidx = 0.
 					dchidy = 0.
@@ -961,12 +821,10 @@ def compile_levelsets_adaptive(genus, g):
 		def __compute_levelsets_outer(integral, f, grad, rshape, shape, levelset, offset):
 			i,j,k = cuda.grid(3)
 
-			#offset kernel indicies to position in function
 			i += offset[0]
 			j += offset[1]
 			k += offset[2]
 
-			#run a kernel bounds check on the outer kernel blocks
 			if i >= shape[0] or j >= shape[1] or k >= shape[2]:
 				return
 
@@ -1038,10 +896,6 @@ def compile_levelsets_adaptive(genus, g):
 
 		@cuda.jit('void(f8[:],f8[:],f8[:,:],i8[:],i8[:],f8[:],f8)')
 		def __compute_levelsets_inner_integrand(integral, f, grad, rshape, shape, g, levelset):
-			#######################
-			#Very similar to __compute_levelsets_inner (fixed). This only computes one levelset
-			#######################
-
 			i,j,k = cuda.grid(3)
 
 			shared = cuda.shared.array(shape = (sh_size,), dtype = float64)
@@ -1110,12 +964,10 @@ def compile_levelsets_adaptive(genus, g):
 		def __compute_levelsets_outer_integrand(integral, f, grad, rshape, shape, g, levelset, offset):
 			i,j,k = cuda.grid(3)
 
-			#offset kernel indicies to position in function
 			i += offset[0]
 			j += offset[1]
 			k += offset[2]
 
-			#run a kernel bounds check on the outer kernel blocks
 			if i >= shape[0] or j >= shape[1] or k >= shape[2]:
 				return
 
@@ -1271,14 +1123,6 @@ def _compile_fg(function):
 		for n in range(offset, shape[0]*shape[1]*shape[2], stride):
 			i,j,k = __unflatten3d(n, shape)
 
-			# i = n%shape[0]
-			# j = (n//shape[0])%shape[1]
-			# k = n//(shape[0]*shape[1])
-
-			# # i = n//(shape[2]*shape[1])
-			# # j = (n//shape[2])%shape[1]
-			# # k = n%shape[2]
-
 			x = (i + 0.5 - shape[0]/2.)/res
 			y = (j + 0.5 - shape[1]/2.)/res
 			z = (k + 0.5 - shape[2]/2.)/res
@@ -1367,28 +1211,29 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 
 	size = np.array(size, dtype = np.float64)
 
-	print('Compiling functions on the GPU')
-
 	fkernel    = f
 	gkernel    = g
 	gradkernel = grad
 	lkernels   = levelset
 
 	if not isinstance(fkernel, cuda.compiler.CUDAKernel):
-		fkernel = compile_f(f)	
+		print('Compiling f on the GPU')
+		fkernel = compile_f(f)
 	if not isinstance(gkernel, cuda.compiler.CUDAKernel):
+		print('Compiling g on the GPU')
 		gkernel = compile_g(g)
 	if not isinstance(gradkernel, cuda.compiler.CUDAKernel):
+		print('Compiling grad on the GPU')
 		gradkernel = compile_grad(genus)
 	if not isinstance(lkernels, cuda.compiler.CUDAKernel):
+		print('Compiling levelsets on the GPU')
 		lkernels = compile_levelsets(genus, quad, gkernel, scheme)
 
 	print('Integration has started')
 
-	# start = time.time()
+	start = time.time()
 
 	#shape of entire domain
-	# shape = (np.ceil(size*res) + 1).astype(np.int64)
 	shape = (np.ceil(size*res)).astype(np.int64)
 
 	#chunk the domain here. Needed if domain size cannot fit into GPU memory
@@ -1410,7 +1255,6 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 		d_g = cuda.device_array((np.prod(largest),  ), dtype = np.float64)
 	# cuda.pinned_array(shape, dtype=np.float)
 
-	#############################
 	#sets limits if global bounds are selected and +-inf is given by finding the global min/max
 	fmins = []
 	fmaxs = []
@@ -1441,7 +1285,6 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 			limit[0] = min(fmins) if fmins else limit[0]
 			#find global max and set upper bound of integration
 			limit[1] = min(fmaxs) if fmaxs else limit[1]
-	#############################
 
 	integral = 0
 	#iterate over each domain chunk and compute the itegral over subdomain
@@ -1465,49 +1308,10 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 
 		compute_fg(fkernel, d_f, d_T, d_rchunk,  res)
 
-		# f = d_f.copy_to_host()[:np.prod(rchunk)]
-		# # print(max(f))
-		# # print(max_gpu(d_f, np.prod(rchunk)))
-		# half = rchunk[2]//2
-		# plt.imshow(f.reshape(rchunk[::-1])[half,:,:], origin = 'upper', vmin = -1, vmax = 0.5)
-		# plt.contour(f.reshape(rchunk[::-1])[half,:,:], [0])
-		# plt.axis('off')
-		# plt.show()
-
 		compute_fg(gkernel, d_g, d_T, d_chunk, res)
-
-		# g = d_g.copy_to_host()[:np.prod(rchunk)]
-		# # print(max(f))
-		# # print(max_gpu(d_f, np.prod(rchunk)))
-		# half = chunk[2]//2
-		# plt.imshow(g.reshape(chunk[::-1])[half,:,:], origin = 'upper', vmin = -1, vmax = 0.5)
-		# plt.contour(g.reshape(chunk[::-1])[half,:,:], [0])
-		# plt.axis('off')
-		# plt.show()
 
 		compute_grad(gradkernel, d_grad, d_f, d_rchunk, d_chunk)
 
-		# half = chunk[2]//2
-		# grad  = d_grad.copy_to_host()
-		# xgrad = grad[:np.prod(chunk),0]
-		# ygrad = grad[:np.prod(chunk),1]
-
-		# plt.imshow(xgrad.reshape(chunk[::-1])[half,:,:], origin = 'upper')#, vmin = -0.08, vmax = 0.08)
-		# plt.axis('off')
-		# plt.show()
-
-		# # #arrows at skeletal points have undefined behavior
-		# # for n in range(np.prod(chunk)):
-		# # 	i = n%chunk[1]
-		# # 	j = n//chunk[1]
-
-		# # 	plt.arrow(i + genus, j + genus, grad[n][1]*res, grad[n][0]*res, head_width=0.15, head_length=0.3)
-
-		# # f = d_f.copy_to_host()[:np.prod(rchunk)]
-		# # plt.imshow(f.reshape(rchunk)[:,:,0], origin = 'upper')
-		# # plt.show()
-
-		#############################
 		if bounds == 'global':
 			#if there is only one chunk and bounds are not given find min/max of already evaluated function
 			if len(chunks) == 1:
@@ -1532,7 +1336,6 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 		elif bounds == 'local':
 			fmin = max(fmin, min_gpu(d_f, np.prod(rchunk)))
 			fmax = min(fmax, max_gpu(d_f, np.prod(rchunk)))
-		#############################
 
 		kargs = [d_integral, d_f, d_grad, d_rchunk, d_chunk]
 		if g is not None:
@@ -1551,6 +1354,7 @@ def integrate_function(size = [1,1,1], limit = [-np.inf, 0], f = None, g = None,
 		elif scheme == 'adaptive':
 			integral += integrate_adaptive(lkernels, kargs, chunk, res, depth, fmin, fmax, err, quad)
 
-	# end = time.time()
+	end = time.time()
+	# print(end - start)
 
 	return integral
